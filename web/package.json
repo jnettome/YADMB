@@ -12,10 +12,10 @@
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.70.2",
+		"@sveltejs/kit": "^2.70.3",
 		"@sveltejs/vite-plugin-svelte": "^7.3.0",
 		"autoprefixer": "^10.5.4",
-		"eslint": "^10.8.1",
+		"eslint": "^10.9.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.23.0",
 		"flowbite": "^4.0.2",
@@ -25,9 +25,9 @@
 		"postcss-load-config": "^6.0.1",
 		"prettier": "^3.9.6",
 		"prettier-plugin-svelte": "^3.5.2",
-		"svelte": "^5.56.9",
+		"svelte": "^5.57.0",
 		"tailwindcss": "^4.3.3",
-		"vite": "^8.2.1"
+		"vite": "^8.2.2"
 	},
 	"type": "module",
 	"dependencies": {
