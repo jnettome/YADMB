@@ -4,6 +4,7 @@ import (
 	"context"
 	e "embed"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -27,10 +28,12 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/kkyr/fig"
 )
 
@@ -61,6 +64,10 @@ var (
 	guildList *sync.Map
 	// Channel used to notify the presence updater that the guild count has changed
 	guildCountChan = make(chan struct{})
+	// API endpoint override (e.g. for GRUPIM / local discord emulation)
+	apiEndpoint string
+	// Gateway endpoint override
+	gatewayEndpoint string
 )
 
 func init() {
@@ -76,6 +83,30 @@ func init() {
 
 	// Config file found
 	token = cfg.Token
+
+	apiEndpoint = cfg.APIEndpoint
+	if apiEndpoint == "" {
+		apiEndpoint = os.Getenv("DISCORD_API_ENDPOINT")
+	}
+
+	gatewayEndpoint = cfg.GatewayEndpoint
+	if gatewayEndpoint == "" {
+		gatewayEndpoint = os.Getenv("DISCORD_GATEWAY_ENDPOINT")
+	}
+
+	if apiEndpoint != "" && gatewayEndpoint == "" {
+		gw := apiEndpoint
+		if strings.HasPrefix(gw, "http://") {
+			gw = "ws://" + strings.TrimPrefix(gw, "http://")
+		} else if strings.HasPrefix(gw, "https://") {
+			gw = "wss://" + strings.TrimPrefix(gw, "https://")
+		}
+		gw = strings.TrimSuffix(gw, "/")
+		if idx := strings.Index(gw, "/api"); idx != -1 {
+			gw = gw[:idx]
+		}
+		gatewayEndpoint = gw + "/gateway"
+	}
 
 	owners = make(map[snowflake.ID]struct{}, len(cfg.Owner))
 	for _, o := range cfg.Owner {
@@ -199,31 +230,62 @@ func main() {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 
-	client, _ := disgo.New(token,
-		bot.WithGatewayConfigOpts(
-			gateway.WithIntents(
-				gateway.IntentGuildVoiceStates,
-				gateway.IntentGuilds,
-			),
+	gatewayOpts := []gateway.ConfigOpt{
+		gateway.WithIntents(
+			gateway.IntentGuildVoiceStates,
+			gateway.IntentGuilds,
 		),
+		gateway.WithCompression(gateway.CompressionNone),
+	}
+	if gatewayEndpoint != "" {
+		gatewayOpts = append(gatewayOpts, gateway.WithURL(gatewayEndpoint))
+	}
 
+	voiceMgrOpts := []voice.ManagerConfigOpt{
+		voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+	}
+	if strings.HasPrefix(apiEndpoint, "http://") || strings.HasPrefix(gatewayEndpoint, "ws://") {
+		plainDialer := &websocket.Dialer{
+			NetDialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			},
+		}
+		voiceMgrOpts = append(voiceMgrOpts,
+			voice.WithConnConfigOpts(
+				voice.WithConnGatewayConfigOpts(
+					voice.WithGatewayDialer(plainDialer),
+				),
+			),
+		)
+	}
+
+	botOpts := []bot.ConfigOpt{
+		bot.WithGatewayConfigOpts(gatewayOpts...),
 		bot.WithCacheConfigOpts(
 			cache.WithCaches(
 				cache.FlagVoiceStates,
 			),
 		),
-
 		bot.WithEventListenerFunc(ready),
 		bot.WithEventListenerFunc(guildCreate),
 		bot.WithEventListenerFunc(guildDelete),
 		//bot.WithEventListenerFunc(voiceStateUpdate),
 		bot.WithEventListenerFunc(guildMemberUpdate),
 		bot.WithEventListenerFunc(interactionCreate),
-
-		bot.WithVoiceManagerConfigOpts(voice.WithDaveSessionCreateFunc(golibdave.NewSession)),
-
+		bot.WithVoiceManagerConfigOpts(voiceMgrOpts...),
 		bot.WithLogger(logger),
-	)
+	}
+
+	if apiEndpoint != "" {
+		botOpts = append(botOpts, bot.WithRestClientConfigOpts(rest.WithURL(apiEndpoint)))
+	}
+
+	client, err := disgo.New(token, botOpts...)
+	if err != nil {
+		lit.Error("Error initializing discord client: %s", err)
+		return
+	}
 
 	defer client.Close(context.TODO())
 
@@ -233,7 +295,7 @@ func main() {
 	}
 
 	// Register commands
-	_, err := client.Rest.SetGlobalCommands(client.ApplicationID, commands)
+	_, err = client.Rest.SetGlobalCommands(client.ApplicationID, commands)
 	if err != nil {
 		lit.Error("Error registering commands: %s", err)
 		return

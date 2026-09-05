@@ -17,6 +17,8 @@ type Config struct {
 	ApiTokens    []apiToken     `fig:"apitokens"`
 	WhiteList    bool           `fig:"whitelist"`
 	GuildList    []snowflake.ID `fig:"guildlist"`
+	APIEndpoint  string         `fig:"apiendpoint"`
+	GatewayEndpoint string     `fig:"gatewayendpoint"`
 }
 
 type apiToken struct {

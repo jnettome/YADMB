@@ -59,7 +59,9 @@ func download(link string, audioOnly bool) []*exec.Cmd {
 	}
 
 	// Starts yt-dlp with the arguments to select the best audio
-	ytDlp := exec.Command("yt-dlp", "-q", "-f", format, "-a", "-", "-o", "-", "--geo-bypass")
+	args := []string{"-q", "-f", format, "-a", "-", "-o", "-", "--geo-bypass"}
+	args = append(args, ytDlpCookieArgs()...)
+	ytDlp := exec.Command("yt-dlp", args...)
 	ytDlp.Stdin = strings.NewReader(link)
 	ytOut, _ := ytDlp.StdoutPipe()
 
