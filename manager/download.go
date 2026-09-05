@@ -29,13 +29,20 @@ const youtubeBase = "https://www.youtube.com/watch?v="
 
 // downloadAndPlay downloads and plays a song from a YouTube link
 func (server *Server) downloadAndPlay(p PlayEvent, respond bool) {
+	p.Song = cleanURL(p.Song)
+
+	// YouTube Mix/Radio: start the seed video immediately, then queue the rest
+	// in the background. Waiting on full mix metadata before play feels broken.
+	if isYouTubeRadioOrMix(p.Song) {
+		server.downloadAndPlayYouTubeMix(p, respond)
+		return
+	}
+
 	var c chan struct{}
 	if respond {
 		c = make(chan struct{})
 		go embed.SendEmbedInteraction(discord.NewEmbed().WithTitle(BotName).AddField(constants.EnqueuedTitle, p.Song, false).WithColor(0x7289DA), p.Event, c, p.IsDeferred)
 	}
-
-	p.Song = cleanURL(p.Song)
 
 	// Check if the song is the db, to speedup things
 	el, err := p.Clients.Database.CheckInDb(p.Song)
@@ -154,6 +161,127 @@ func (server *Server) downloadAndPlay(p PlayEvent, respond bool) {
 	}
 
 	server.AddSong(p.Priority, elements...)
+}
+
+// downloadAndPlayYouTubeMix plays the seed video right away, then appends up to
+// 24 more Mix/Radio tracks discovered via a flat yt-dlp listing.
+func (server *Server) downloadAndPlayYouTubeMix(p PlayEvent, respond bool) {
+	seedLink := p.Song
+	if stripped, err := FilterPlaylist(p.Song); err == nil && stripped != "" {
+		seedLink = stripped
+	}
+	seedID := youtubeVideoID(seedLink)
+
+	seed := p
+	seed.Song = seedLink
+	server.downloadAndPlay(seed, respond)
+
+	go func() {
+		entries, err := getMixFlatEntries(p.Song)
+		if err != nil {
+			lit.Error("YouTube Mix listing failed: %s", err)
+			return
+		}
+		if p.Random {
+			entries = shuffleMixEntries(entries)
+		}
+		for _, entry := range entries {
+			if server.Clear.Load() {
+				return
+			}
+			if entry.ID == "" || entry.ID == seedID {
+				continue
+			}
+			server.downloadAndPlay(PlayEvent{
+				Username:    p.Username,
+				Song:        youtubeBase + entry.ID,
+				Clients:     p.Clients,
+				Event:       p.Event,
+				Random:      false,
+				Loop:        p.Loop,
+				Priority:    false,
+				IsDeferred:  nil,
+				TextChannel: p.TextChannel,
+			}, false)
+		}
+	}()
+}
+
+type mixEntry struct {
+	ID    string
+	Title string
+}
+
+func getMixFlatEntries(link string) ([]mixEntry, error) {
+	args := []string{
+		"--ignore-errors", "-q", "--no-warnings",
+		"--flat-playlist", "--lazy-playlist",
+		"--playlist-end", "25",
+		"-j", link,
+	}
+	args = append(args, ytDlpCookieArgs()...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "yt-dlp", args...).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, errors.New("timed out listing YouTube Mix")
+	}
+	if err != nil && len(out) == 0 {
+		return nil, err
+	}
+
+	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	entries := make([]mixEntry, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var row struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+			URL   string `json:"url"`
+		}
+		if json.Unmarshal([]byte(line), &row) != nil {
+			continue
+		}
+		id := row.ID
+		if id == "" {
+			id = youtubeVideoID(row.URL)
+		}
+		if id == "" {
+			continue
+		}
+		entries = append(entries, mixEntry{ID: id, Title: row.Title})
+	}
+	if len(entries) == 0 {
+		return nil, errors.New("no Mix entries found")
+	}
+	return entries, nil
+}
+
+func youtubeVideoID(link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	if v := u.Query().Get("v"); v != "" {
+		return v
+	}
+	if strings.Contains(u.Host, "youtu.be") {
+		return strings.TrimPrefix(u.Path, "/")
+	}
+	return ""
+}
+
+func shuffleMixEntries(a []mixEntry) []mixEntry {
+	final := make([]mixEntry, len(a))
+	for i, v := range rand.Perm(len(a)) {
+		final[v] = a[i]
+	}
+	return final
 }
 
 // DownloadAndPlayYouTubeAPI downloads and plays a song from a YouTube link, parsing the link with the YouTube API
