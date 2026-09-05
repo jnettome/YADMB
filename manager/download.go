@@ -302,8 +302,10 @@ func searchDownloadAndPlay(query string, yt *youtube.YouTube, db *database.Datab
 	}
 
 	// yt-dlp is used as a fallback if the YouTube API doesn't return anything or if the YouTube client is not configured
-	out, err := exec.Command("yt-dlp", "--get-id", "--quiet", "--ignore-errors", "--no-warnings",
-		"--default-search", "ytsearch", query).CombinedOutput()
+	args := []string{"--get-id", "--quiet", "--ignore-errors", "--no-warnings",
+		"--default-search", "ytsearch", query}
+	args = append(args, ytDlpCookieArgs()...)
+	out, err := exec.Command("yt-dlp", args...).CombinedOutput()
 	if err == nil {
 		ids := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
 
@@ -465,8 +467,10 @@ func (server *Server) spotifyTrack(p PlayEvent, id spotAPI.ID) {
 
 // getInfo returns info about a song, with every line of the returned array as JSON of type YtDLP
 func getInfo(link string) ([]string, error) {
-	// Gets info about songs
-	out, err := exec.Command("yt-dlp", "--ignore-errors", "-q", "--no-warnings", "-j", link).CombinedOutput()
+	// Cap playlist extraction — YouTube Mix (RD…) and huge lists otherwise hang forever.
+	args := []string{"--ignore-errors", "-q", "--no-warnings", "--playlist-end", "50", "-j", link}
+	args = append(args, ytDlpCookieArgs()...)
+	out, err := exec.Command("yt-dlp", args...).CombinedOutput()
 
 	// Parse output as string, splitting it on every newline
 	splittedOut := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")

@@ -31,15 +31,7 @@ func (server *Server) PlayCommand(clients *Clients, e *events.ApplicationCommand
 			priority = options.Bool("priority")
 
 			link = options.String("link")
-			// /play used to reject playlist-only YouTube URLs ("use /playlist").
-			// Accept them on both commands; only strip list= when a video id is present
-			// so watch?v=X&list=Y still queues that single video unless /playlist is used.
-			if !playlist {
-				if keep, stripErr := FilterPlaylist(link); stripErr == nil {
-					link = keep
-				}
-				// stripErr means playlist-only link — keep original and play the full list
-			}
+			link = NormalizePlayLink(link, playlist)
 
 			server.Play(PlayEvent{
 				Username:    e.Member().User.Username,

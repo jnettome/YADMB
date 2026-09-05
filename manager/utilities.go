@@ -35,6 +35,8 @@ func FilterPlaylist(link string) (string, error) {
 		q := u.Query()
 		q.Del("list")
 		q.Del("index")
+		q.Del("start_radio")
+		q.Del("rv")
 		if q.Has("v") || be {
 			u.RawQuery = q.Encode()
 			return u.String(), nil
@@ -47,6 +49,38 @@ func FilterPlaylist(link string) (string, error) {
 	}
 
 	return link, nil
+}
+
+// isYouTubeRadioOrMix reports YouTube Mix / Radio playlists (list=RD…, start_radio=1).
+// Those are effectively infinite — yt-dlp -j hangs dumping them.
+func isYouTubeRadioOrMix(link string) bool {
+	u, err := url.Parse(link)
+	if err != nil {
+		return false
+	}
+	q := u.Query()
+	if q.Get("start_radio") != "" {
+		return true
+	}
+	list := q.Get("list")
+	return strings.HasPrefix(list, "RD") || strings.HasPrefix(list, "UL") || strings.HasPrefix(list, "RDMM")
+}
+
+// NormalizePlayLink prepares a link for enqueue.
+// Radio/Mix URLs always collapse to the seed video. In /play mode, list= is stripped
+// when a video id is present; playlist-only links are kept for /play and /playlist.
+func NormalizePlayLink(link string, playlistMode bool) string {
+	if isYouTubeRadioOrMix(link) {
+		if stripped, err := FilterPlaylist(link); err == nil && stripped != "" {
+			return stripped
+		}
+	}
+	if !playlistMode {
+		if keep, err := FilterPlaylist(link); err == nil {
+			return keep
+		}
+	}
+	return link
 }
 
 // IsValidURL Checks if a string is a valid URL
