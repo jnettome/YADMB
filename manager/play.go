@@ -30,32 +30,30 @@ func (server *Server) PlayCommand(clients *Clients, e *events.ApplicationCommand
 			loop = options.Bool("loop")
 			priority = options.Bool("priority")
 
-			var err error
 			link = options.String("link")
+			// /play used to reject playlist-only YouTube URLs ("use /playlist").
+			// Accept them on both commands; only strip list= when a video id is present
+			// so watch?v=X&list=Y still queues that single video unless /playlist is used.
 			if !playlist {
-				link, err = FilterPlaylist(link)
+				if keep, stripErr := FilterPlaylist(link); stripErr == nil {
+					link = keep
+				}
+				// stripErr means playlist-only link — keep original and play the full list
 			}
 
-			if err == nil {
-				server.Play(PlayEvent{
-					Username:    e.Member().User.Username,
-					Song:        link,
-					Clients:     clients,
-					Event:       e,
-					Random:      shuffle,
-					Loop:        loop,
-					Priority:    priority,
-					IsDeferred:  c,
-					TextChannel: e.Channel().ID(),
-				})
+			server.Play(PlayEvent{
+				Username:    e.Member().User.Username,
+				Song:        link,
+				Clients:     clients,
+				Event:       e,
+				Random:      shuffle,
+				Loop:        loop,
+				Priority:    priority,
+				IsDeferred:  c,
+				TextChannel: e.Channel().ID(),
+			})
 
-				status = Success
-			} else {
-				embed.SendAndDeleteEmbedInteraction(discord.NewEmbed().WithTitle(BotName).AddField(constants.ErrorTitle,
-					"Playlist detected, but playlist command not used.", false).
-					WithColor(0x7289DA), e, time.Second*10, c)
-				status = Playlist
-			}
+			status = Success
 		}
 	} else {
 		embed.SendAndDeleteEmbedInteraction(discord.NewEmbed().WithTitle(BotName).AddField(constants.ErrorTitle, constants.NotInVC, false).

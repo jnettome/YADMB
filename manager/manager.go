@@ -182,7 +182,8 @@ func (server *Server) handleQuitVC() {
 		c = <-server.ChanQuitVC
 		if c {
 			if timer == nil {
-				timer = time.AfterFunc(time.Minute, server.QuitVC)
+				// Leave soon after the queue ends (was 1m — felt like "never disconnects").
+				timer = time.AfterFunc(15*time.Second, server.QuitVC)
 			}
 		} else {
 			if timer != nil {

@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"time"
 
 	"github.com/TheTipo01/YADMB/constants"
@@ -25,10 +26,20 @@ func JoinVC(e *events.ApplicationCommandInteractionCreate, channelID snowflake.I
 	return true
 }
 
-// QuitVC disconnects the bot from the voice channel after 1 minute if nothing is playing
+// QuitVC disconnects the bot from the voice channel after a short idle if nothing is playing
 func (server *Server) QuitVC() {
-	if server.Queue.IsEmpty() {
-		server.VC.Disconnect()
+	if !server.Queue.IsEmpty() {
+		return
+	}
+
+	server.VC.Disconnect()
+
+	// Also send Opcode 4 leave on the main gateway. Close() alone can no-op when
+	// the voice WS is stuck reconnecting — GRUPIM then keeps the bot in the roster.
+	if server.Clients != nil && server.Clients.Discord != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Clients.Discord.UpdateVoiceState(ctx, server.GuildID, nil, false, false)
 	}
 }
 
