@@ -2,12 +2,14 @@ package manager
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"math/rand"
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -467,13 +469,31 @@ func (server *Server) spotifyTrack(p PlayEvent, id spotAPI.ID) {
 
 // getInfo returns info about a song, with every line of the returned array as JSON of type YtDLP
 func getInfo(link string) ([]string, error) {
-	// Cap playlist extraction — YouTube Mix (RD…) and huge lists otherwise hang forever.
-	args := []string{"--ignore-errors", "-q", "--no-warnings", "--playlist-end", "50", "-j", link}
+	// Cap extraction so Mix/Radio (effectively infinite) and huge lists cannot hang forever.
+	end := 50
+	if isYouTubeRadioOrMix(link) {
+		end = 25
+	}
+
+	args := []string{
+		"--ignore-errors", "-q", "--no-warnings",
+		"--playlist-end", strconv.Itoa(end),
+		"--lazy-playlist",
+		"-j", link,
+	}
 	args = append(args, ytDlpCookieArgs()...)
-	out, err := exec.Command("yt-dlp", args...).CombinedOutput()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "yt-dlp", args...).CombinedOutput()
 
 	// Parse output as string, splitting it on every newline
 	splittedOut := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, errors.New("Can't get info about song: timed out loading playlist")
+	}
 
 	if err != nil {
 		return nil, errors.New("Can't get info about song: " + splittedOut[len(splittedOut)-1])

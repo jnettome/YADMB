@@ -52,7 +52,6 @@ func FilterPlaylist(link string) (string, error) {
 }
 
 // isYouTubeRadioOrMix reports YouTube Mix / Radio playlists (list=RD…, start_radio=1).
-// Those are effectively infinite — yt-dlp -j hangs dumping them.
 func isYouTubeRadioOrMix(link string) bool {
 	u, err := url.Parse(link)
 	if err != nil {
@@ -67,13 +66,12 @@ func isYouTubeRadioOrMix(link string) bool {
 }
 
 // NormalizePlayLink prepares a link for enqueue.
-// Radio/Mix URLs always collapse to the seed video. In /play mode, list= is stripped
-// when a video id is present; playlist-only links are kept for /play and /playlist.
+// YouTube Mix/Radio (list=RD…, start_radio) is kept intact so getInfo can queue
+// multiple tracks (capped). In /play mode, other list= params are stripped when a
+// video id is present; playlist-only links are kept for both commands.
 func NormalizePlayLink(link string, playlistMode bool) string {
 	if isYouTubeRadioOrMix(link) {
-		if stripped, err := FilterPlaylist(link); err == nil && stripped != "" {
-			return stripped
-		}
+		return link
 	}
 	if !playlistMode {
 		if keep, err := FilterPlaylist(link); err == nil {
