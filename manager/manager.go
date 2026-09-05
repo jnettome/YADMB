@@ -79,6 +79,9 @@ func (server *Server) play() {
 				WithColor(0x7289DA).WithThumbnail(el.Thumbnail), el.TextChannel)
 		}()
 
+		// Guild nick = now-playing marquee for GRUPIM desktop voice member list
+		server.setNowPlayingNick(el.Title)
+
 		var err error
 
 		if el.BeforePlay != nil {
@@ -134,6 +137,7 @@ func (server *Server) play() {
 		server.Queue.RemoveFirstElement()
 	}
 
+	server.setNowPlayingNick("")
 	server.Started.Store(false)
 
 	server.ChanQuitVC <- true
@@ -166,6 +170,7 @@ func (server *Server) Clean() {
 
 		server.ChanQuitVC <- true
 	}
+	server.setNowPlayingNick("")
 }
 
 func (server *Server) handleQuitVC() {
